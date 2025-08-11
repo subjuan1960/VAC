@@ -1,32 +1,31 @@
 clear; clc; close all;
 %% Validation of input compensator
 dt = 0.001;
-T = 20;
+T = 4;
 % N = T/dt;
-time = 0:dt:T;
-N = numel(time);
+t = 0:dt:T;
+N = numel(t);
 
 % Human dynamics parameters
-Mh = @(t) 0.1*sin(t) + 1.5;
-Dh = @(t) 0.05*sin(0.5*t) + 0.1;
+Mh = 0.1*sin(t) + 1.5;
+Dh = 0.05*sin(0.5*t) + 0.1;
 % Robot dynamics parameters
 Ma = 2;
 Da = 0.4;
 
-% preallocation 
+%% preallocation 
 % motion related (xr, xrd, xrdd, xh, xhd, xhdd)
 % Fh, lam, lamh
-xr = zeros(1, N);
-xrd = zeros(1, N);
-xrdd = zeros(1, N);
 
-xhd = zeros(1, N);
-xhd = zeros(1, N);
-xhdd = zeros(1, N);
+x = zeros(1, N);
+xd = zeros(1, N);
+xdd = zeros(1, N);
 
 fh = zeros(1, N);
+fm = zeros(1, N);
 lam = zeros(1, N);
 lamh = zeros(1,N);
+A = zeros(1, N);
 
 %% Select scenario: 1=sinusoidal, 2=move-and-stop
 scenario = 1;
@@ -34,83 +33,105 @@ scenario = 1;
 switch scenario
   case 1
     % sinusoidal motion at 0.5, 1.0, and 4.0 Hz
-    freqs = [0.5, 1.0, 4.0];
-    amp   = 0.1;  % [m] amplitude
+    freq = 0.5;
+    amp   = 1;  % [m] amplitude
+
+    xhd = amp * sin(2*pi*freq*t);
+    xhdd = amp * 2*pi * freq * cos(2*pi*freq*t);
     
-    for k = 1:N
-      t = time(k);
-      xh(k) = amp * sum(sin(2*pi*freqs*t));
-    end
-    
+
   case 2
+    A = 0.05;
+    k = 30;
     % move-and-stop using arctan profile
-    for k = 1:N
-      t = time(k);
-      xh(k) = 0.05 * atan(30 * t);
-    end
+    xh = A * atan(k * t);
+    xhd = A * k ./ (1 + (k * t).^2);
+    xhdd = -2 * A * k^3 * t ./ (1 + (k * t).^2).^2;
     
   otherwise
     error('Unknown scenario');
 end
 
-% Compute human velocity and acceleration (finite differences)
-for k = 2:N-1
-  xhd(k)  = (xh(k+1)-xh(k-1))/(2*dt);
-  xhdd(k) = (xh(k+1)-2*xh(k)+xh(k-1))/(dt^2);
-end
-
 %% Main simulation loop
 
-% Compute the initial interaction force
+xrd = [xhd(1), xhd(1:end-1)];
+xrdd = [xhdd(1), xhdd(1:end-1)];
+xd(1)  = xhd(1);
+xdd(1) = xhdd(1);
 
-for k = 1:N-1
-  t = time(k);
-  
-  % 1) Compute interaction force Fh via human dynamics
-  Fh(k) = Mh(t)*xhdd(k) + Dh(t)*xhd(k);
-  
-  fm(k) = Fh(k);
+% initial conditions
+lamh(1) = Ma * xhdd(1) + Da * xhd(1);  % Eq. 10
 
-  if k==1
-      fh(1) = Fh(1);
-      lam(1) = Fh(1);
-  else
-      fh(k) = fh(k-1) + fm(k);
-      lam(k) = (fh(k-1) + fm(k))...
-          * (1/fh(k-1))...
-          * (lam(k-1) + fm(k));
-  end
+fh(1)   = Mh(1)*xhdd(1) + Dh(1)*xhd(1);  % Eq. 24
+fm(1)   = fh(1) - Mh(1)*xdd(1) - Dh(1)*xd(1);
 
-  % 2) Reconstruct lambda_h (fill in per paper’s Eqn. steps)
-  %    ----------------------------------------------------------------
-  %    lambda(k) = <YOUR ENERGY-BASED / SMC INVERSION HERE>;
-  %    ----------------------------------------------------------------
-  
-  % 3) Admittance: M_a·xddot_r + D_a·xdot_r = lambda_h
-  %    → xddot_r = (lambda(k) - Da*xdot_r(k)) / Ma
-  xrdd(k) = (lambda(k) - Da*xrd(k)) / Ma;
-  
-  % 4) Integrate robot ref motion
-  xrd(k+1) = xrd(k) + xrdd(k)*dt;
-  xr(k+1)    = xr(k)    + xrd(k)*dt;
+
+for k = 2:N
+  fh(k) = Mh(k) * xhdd(k) + Dh(k) * xhd(k);
+  fm(k) = Mh(k) * (xhdd(k) - xrdd(k)) + Dh(k) * (xhd(k) - xrd(k));
+
+  lam(k) = Ma * xrdd(k) + Da * xrd(k) - fm(k);
+
+  A(k) = xrd(k) / xhd(k) * (xhd(k) - xhd(k-1))^2 / (xrd(k) - xrd(k-1))^2;
+
+  lamh(k) = A(k) * (lam(k) + fm(k));
+
+  xdd(k) = (1/Ma) * (lamh(k) - Da * xd(k-1));
+  xd(k) = xd(k-1) + xdd(k)*dt;
 end
+
+%   xdd(2) = (1/Ma) * (lamh(1) - Da * xd(1));
+%   xd(2) = xd(1) + xdd(2)*dt; 
+% 
+% for k = 2:N-1
+%   fh(k) = Mh(k) * xhdd(k) + Dh(k) * xhd(k);
+%   fm(k) = Mh(k) * (xhdd(k) - xdd(k)) + Dh(k) * (xhd(k) - xd(k));
+% 
+%   lam(k) = Ma * xdd(k) + Da * xd(k) - fm(k);
+% 
+%   A(k) = xd(k) / xhd(k) * (xhd(k) - xhd(k-1))^2 / (xd(k) - xd(k-1))^2;
+% 
+%   lamh(k) = A(k) * (lam(k) + fm(k));
+% 
+%   xdd(k+1) = (1/Ma) * (lamh(k) - Da * xd(k));
+%   xd(k+1) = xd(k) + xdd(k+1)*dt;
+% end
 
 %% Plot results
 figure;
-subplot(3,1,1);
-plot(time, xh, time, xr, '--','LineWidth',1.2);
-legend('Human motion','Robot ref');
-xlabel('Time [s]'); ylabel('Position [m]');
+subplot(4,1,1);
+plot(t, xhd, 'r--', t, xrd, 'b');
+xlabel('Time [s]'); ylabel('velocity [m/s]');
+legend('x_hd (intent)', 'xd (robot)');
+title('Position tracking');
 
-subplot(3,1,2);
-plot(time, Fh, 'LineWidth',1.2);
-xlabel('Time [s]'); ylabel('Interaction force [N]');
+subplot(4,1,2);
+plot(t, fm);
+xlabel('Time [s]'); ylabel('Interaction Force [N]');
+title('Interaction force f_m');
 
-subplot(3,1,3);
-plot(time, lambda, 'LineWidth',1.2);
-xlabel('Time [s]'); ylabel('\lambda_h [N]');
+subplot(4,1,3);
+plot(t, lamh);
+xlabel('Time [s]'); ylabel('Compensation \lambda_h [N]');
+title('Input compensation');
 
-sgtitle('SMC–VAC Simulation Skeleton');
+subplot(4,1,4);
+plot(t, xhd, 'r--', t, xd, 'b');
+xlabel('Time [s]'); ylabel('velocity [m/s]');
+legend('x_hd (intent)', 'xd (robot)');
+title('Position tracking');
 
 
 
+%%
+% Prepare data for export
+data = table(...
+    t', ...
+    xhd', ...       % Human velocity
+    xrd', ...        % Robot velocity
+    fm', ...        % Interaction force
+    'VariableNames', {'Time', 'HumanVelocity', 'RobotVelocity', 'InteractionForce'} ...
+);
+
+% Save to CSV
+writetable(data, 'freespace_results.csv');
