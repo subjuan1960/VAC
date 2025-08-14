@@ -60,6 +60,8 @@ Expandable Ideas:
 after VAC updated interaction force, include a little force compensation and see if the error can be mitigated.
 
 -------------------------------------------------------
-derive lyapunov stability from system
+derive Lyapunov stability from system
 look at further improving sliding surface
 how to adaptively tune the force compensator gain
+
+test
