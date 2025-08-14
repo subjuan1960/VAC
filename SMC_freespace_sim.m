@@ -1,7 +1,7 @@
 clear; clc; close all;
 %% parameters
 dt = 0.001;
-T = 4;
+T = 20;
 t = 0:dt:T;
 N = numel(t);
 
@@ -22,19 +22,27 @@ xdd = zeros(1, N);
 
 fh = zeros(1, N);
 fm = zeros(1, N);
-fm_comp = zeros(1, N);
+% fm_comp = zeros(1, N);
+
+lam = zeros(1, N);
+lamh = zeros(1, N);
+A = zeros(1, N);
+
 
 D = zeros(1, N);
 Dd = zeros(1, N);
 S = zeros(1, N);
 %% Sinusoidal motion profile
 
-scenario = 2; % 1 for sine, 2 for arctan
+scenario = 1; % 1 for sine, 2 for arctan
 
 switch scenario
     case 1
-        freq = 0.1;
-        amp   = 1;  % [m] amplitude
+        % freq = 0.1;
+        % amp   = 1;  % [m] amplitude
+
+        freq = 4;
+        amp   = 4;  % [m] amplitude
         xhd = amp * sin(2*pi*freq*t);
         xhdd = amp * 2*pi * freq * cos(2*pi*freq*t);
     case 2
@@ -54,7 +62,7 @@ fh(1) = Mh(1) * xhdd(1) + Dh(1) * xhd(1);
 fm(1) = Mh(1) * (xhdd(1) - xdd(1)) + Dh(1) * (xhd(1) - xd(1));
 
 D(1) = Da;
-eps = 1e-6;
+eps = 3e-1; % [[[[[[[[[[how to adaptively tune epsilon]]]]]]]]]] 3e-1
 gamma = 0.05; % scaling coeff of fm
 ks = 1; % sliding gain
 phi = 0.01; % boundary layer width
@@ -80,10 +88,24 @@ for k = 2:N-1
     % D(k) = clamp(Fstd / abs(xd(k-1)+ 1e-6), Dmin, Dmax);
 
     fm(k) = Mh(k) * (xhdd(k) - xdd(k)) + Dh(k) * (xhd(k) - xd(k));
-
-    xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
-    xd(k+1) = xd(k) + xdd(k) * dt;
     
+    % if abs(fm(k)) > 30
+    %     lam(k) = Ma * xdd(k) + D(k) * xd(k) - fm(k);
+    % 
+    %     A(k) = xd(k) / xhd(k) * (xhd(k) - xhd(k-1))^2 / (xd(k) - xd(k-1))^2;
+    % 
+    %     lamh(k) = A(k) * (lam(k) + fm(k));
+    %     Fs = lamh(k);
+    % 
+    %     xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
+    %     xd(k+1) = xd(k) + xdd(k) * dt;
+    % else
+    %     xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
+    %     xd(k+1) = xd(k) + xdd(k) * dt;
+    % end
+
+    xdd(k+1) = (1/Ma) * ((1+eps)*Fs - D(k) * xd(k));
+    xd(k+1) = xd(k) + xdd(k) * dt;
 end
 
 %% Plot results
@@ -94,7 +116,7 @@ subplot(4, 1, 1);
 plot(t, S, "LineWidth", 1.5);
 xlabel('Time [s]'); ylabel('S = Fm * xd');
 title('Sliding Surface Convergence');
-xlim([2.5, 3.5])
+% xlim([2.5, 3.5])
 grid on;
 
 % 2) velocity tracking
@@ -103,21 +125,21 @@ plot(t, xhd, 'r--', t, xd, 'b');
 xlabel('Time [s]'); ylabel('velocity [m/s]');
 legend('x_hd (intent)', 'xd (robot)');
 title('Velocity tracking');
-xlim([2.5, 3.5])
+% xlim([2.5, 3.5])
 
 % 3) interaction force
 subplot(4,1,3);
 plot(t, fm);
 xlabel('Time [s]'); ylabel('Interaction Force [N]');
 title('Interaction force f_m');
-xlim([2.5, 3.5])
+% xlim([2.5, 3.5])
 
 % 4) damping adaptation
 subplot(4,1,4);
 plot(t, D);
 xlabel('Time [s]'); ylabel('Damping Nm/s');
 title('Adapted Damping D(t)');
-xlim([2.5, 3.5])
+% xlim([2.5, 3.5])
 
 
 % %%

@@ -1,7 +1,7 @@
 clear; clc; close all;
 %% parameters
 dt = 0.001;
-T = 20;
+T = 4;
 t = 0:dt:T;
 N = numel(t);
 
@@ -22,13 +22,19 @@ xdd = zeros(1, N);
 
 fh = zeros(1, N);
 fm = zeros(1, N);
+% fm_comp = zeros(1, N);
+
+lam = zeros(1, N);
+lamh = zeros(1, N);
+A = zeros(1, N);
+
 
 D = zeros(1, N);
 Dd = zeros(1, N);
 S = zeros(1, N);
 %% Sinusoidal motion profile
 
-scenario = 1; % 1 for sine, 2 for arctan
+scenario = 2; % 1 for sine, 2 for arctan
 
 switch scenario
     case 1
@@ -79,6 +85,17 @@ for k = 2:N-1
     % D(k) = clamp(Fstd / abs(xd(k-1)+ 1e-6), Dmin, Dmax);
 
     fm(k) = Mh(k) * (xhdd(k) - xdd(k)) + Dh(k) * (xhd(k) - xd(k));
+    
+    if abs(fm(k)) > 0.5
+        lam(k) = Ma * xdd(k) + D(k) * xd(k) - fm(k);
+
+        A(k) = xd(k) / xhd(k) * (xhd(k) - xhd(k-1))^2 / (xd(k) - xd(k-1))^2;
+    
+        lamh(k) = A(k) * (lam(k) + fm(k));
+        
+        xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
+        xd(k+1) = xd(k) + xdd(k) * dt;
+    end
 
     xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
     xd(k+1) = xd(k) + xdd(k) * dt;
@@ -93,6 +110,7 @@ subplot(4, 1, 1);
 plot(t, S, "LineWidth", 1.5);
 xlabel('Time [s]'); ylabel('S = Fm * xd');
 title('Sliding Surface Convergence');
+xlim([2.5, 3.5])
 grid on;
 
 % 2) velocity tracking
@@ -101,18 +119,21 @@ plot(t, xhd, 'r--', t, xd, 'b');
 xlabel('Time [s]'); ylabel('velocity [m/s]');
 legend('x_hd (intent)', 'xd (robot)');
 title('Velocity tracking');
+xlim([2.5, 3.5])
 
 % 3) interaction force
 subplot(4,1,3);
 plot(t, fm);
 xlabel('Time [s]'); ylabel('Interaction Force [N]');
 title('Interaction force f_m');
+xlim([2.5, 3.5])
 
 % 4) damping adaptation
 subplot(4,1,4);
 plot(t, D);
 xlabel('Time [s]'); ylabel('Damping Nm/s');
 title('Adapted Damping D(t)');
+xlim([2.5, 3.5])
 
 
 % %%
