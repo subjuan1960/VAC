@@ -16,7 +16,7 @@ Da = 0.4;
 
 Dmin = 0.05;
 Dmax = 50.0;
-Fstd = 0;
+Fstd = 0.001;
 %% preallocation
 x = zeros(1, N);
 xd = zeros(1, N);
@@ -31,8 +31,8 @@ D = zeros(1, N);
 
 fcomp = zeros(1, N);
 %% Sinusoidal motion profile
-freq = 0.5;
-amp   = 1;  % [m] amplitude
+freq = 1.0;
+amp   = 2;  % [m] amplitude
 
 xhd = amp * sin(2*pi*freq*t);
 xhdd = amp * 2*pi * freq * cos(2*pi*freq*t);
@@ -66,16 +66,3 @@ subplot(4,1,2); plot(t, D); title('Adapted Damping D(t)');
 subplot(4,1,3); plot(t, fm); title('Interaction Force f_m(t)');
 
 subplot(4,1,4); plot(t, fcomp); title('Compensation Force fcomp(t)');
-
-%%
-% Prepare data for export
-data = table(...
-    t', ...
-    xhd', ...       % Human velocity
-    xd', ...        % Robot velocity
-    fm', ...        % Interaction force
-    'VariableNames', {'Time', 'HumanVelocity', 'RobotVelocity', 'InteractionForce'} ...
-);
-
-% Save to CSV
-writetable(data, 'VAC1_results.csv');

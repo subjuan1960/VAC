@@ -1,135 +1,137 @@
 clear; clc; close all;
-
-%% Parameters
+%% parameters
 dt = 0.001;
 T = 4;
 t = 0:dt:T;
 N = numel(t);
 
-% Human dynamics
+% Human dynamics parameters
 Mh = 0.1*sin(t) + 1.5;
 Dh = 0.05*sin(0.5*t) + 0.1;
-
-% Robot dynamics
+% Robot dynamics parameters
 Ma = 2;
-Da_init = 0.4;  % initial damping
+Da = 0.4;
 
 Dmin = 0.05;
 Dmax = 100.0;
 
-%% Motion profile (human velocity intent)
-freq = 4;
-amp   = 4;  % [m/s] amplitude
-
-xhd  = amp * sin(2*pi*freq*t);
-xhdd = amp * 2*pi * freq * cos(2*pi*freq*t);
-
-% A = 30;
-% k = 0.05;
-% xhd = A * k ./ (1 + (k * t).^2);
-% xhdd = -2 * A * k^3 * t ./ (1 + (k * t).^2).^2;
-
-%% Preallocation
-x   = zeros(1, N);
-xd  = zeros(1, N);
+%% preallocation
+x = zeros(1, N);
+xd = zeros(1, N);
 xdd = zeros(1, N);
 
-fh  = zeros(1, N);
-fm  = zeros(1, N);
-fm_filt = zeros(1, N);
+fh = zeros(1, N);
+fm = zeros(1, N);
+fm_comp = zeros(1, N);
 
-D   = zeros(1, N);
-Dd  = zeros(1, N);
-S   = zeros(1, N);
+D = zeros(1, N);
+Dd = zeros(1, N);
+S = zeros(1, N);
+%% Sinusoidal motion profile
 
-%% Sliding mode / adaptation parameters
-eps     = 1e-6;
-gamma   = 0.05;  % power term weight
-ks      = 1;     % sliding gain
-phi     = 0.01;  % boundary layer width
-Dd_max  = 50;    % max rate of change of D [N·s/m^2]
-alpha_f = 0.05;  % low-pass filter coeff for fm
+scenario = 2; % 1 for sine, 2 for arctan
 
-sat = @(z) max(min(z,1),-1);  % saturation function
+switch scenario
+    case 1
+        freq = 0.1;
+        amp   = 1;  % [m] amplitude
+        xhd = amp * sin(2*pi*freq*t);
+        xhdd = amp * 2*pi * freq * cos(2*pi*freq*t);
+    case 2
+        A = 0.05;
+        k = 30;
+        % move-and-stop using arctan profile
+        xh = A * atan(k * (t-3));
+        xhd = A * k ./ (1 + (k * (t-3)).^2);
+        xhdd = -2 * A * k^3 * (t-3) ./ (1 + (k * (t-3)).^2).^2;
+end
 
-%% Initial conditions (match human at t=0 to avoid big initial force)
-xd(1)  = xhd(1);
-xdd(1) = xhdd(1);
-D(1)   = Da_init;
+%% Sim loop
+xd(1) = 0;
+xdd(1) = 0;
 
-% Initial human force and filtered fm
-fh(1)     = Mh(1)*xhdd(1) + Dh(1)*xhd(1);
-fm(1)     = fh(1) - Mh(1)*xdd(1) - Dh(1)*xd(1);
-fm_filt(1)= fm(1);
+fh(1) = Mh(1) * xhdd(1) + Dh(1) * xhd(1);
+fm(1) = Mh(1) * (xhdd(1) - xdd(1)) + Dh(1) * (xhd(1) - xd(1));
 
-%% Simulation loop
+D(1) = Da;
+eps = 1e-6;
+gamma = 0.05; % scaling coeff of fm
+ks = 1; % sliding gain
+phi = 0.01; % boundary layer width
+% %%
+% Fstd = 0.001;
+% clamp = @(x, minVal, maxVal) max(min(x, maxVal), minVal);
+%%
+
+xdd(2) = (1/Ma) * (fh(1) - D(1) * xd(1));
+xd(2) = xd(1) + xdd(2) * dt;
+
+
+
 for k = 2:N-1
-    % 1) Human force at this step
-    fh(k) = Mh(k)*xhdd(k) + Dh(k)*xhd(k);
+    Fs = Mh(k) * xhdd(k) + Dh(k) * xhd(k);
 
-    % 2) Interaction force from mismatch
-    fm(k) = fh(k) - Mh(k)*xdd(k) - Dh(k)*xd(k);
+    S(k) = fm(k-1) * xd(k);
+    
+    Dd(k) = -ks * S(k);
+    D(k) = D(k-1) + Dd(k) * dt;
+    D(k) = min(max(D(k), Dmin), Dmax);
+    
+    % D(k) = clamp(Fstd / abs(xd(k-1)+ 1e-6), Dmin, Dmax);
 
-    % 3) Low-pass filter fm
-    fm_filt(k) = (1-alpha_f)*fm_filt(max(k-1,1)) + alpha_f*fm(k);
+    fm(k) = Mh(k) * (xhdd(k) - xdd(k)) + Dh(k) * (xhd(k) - xd(k));
 
-    % 4) Sliding surface
-    S(k) = fm_filt(k)*xd(k) / (abs(fm_filt(k))+eps) - gamma*fm_filt(k)^2;
-    % S(k) = (fm(k) - fm(k-1))*xd(k);
-    % 5) Damping adaptation with boundary layer + rate limit
-    Dd(k) = -ks * sat(S(k)/phi);
-    % Dd(k) = -ks * S(k);
-    Dd(k) = max(min(Dd(k), Dd_max), -Dd_max);
-    D(k)  = D(k) + Dd(k)*dt;
-    D(k)  = min(max(D(k), Dmin), Dmax);
-
-    % 6) Admittance integration
-    xdd(k+1) = (1/Ma) * (fh(k) - D(k) * xd(k));
-    xd(k+1)  = xd(k) + xdd(k+1)*dt;
+    xdd(k+1) = (1/Ma) * (Fs - D(k) * xd(k));
+    xd(k+1) = xd(k) + xdd(k) * dt;
+    
 end
 
 %% Plot results
+
+% 1) Sliding surface
 figure;
-subplot(3,1,1);
-plot(t, S, 'LineWidth', 1.5);
-xlabel('Time [s]'); ylabel('S');
-title('Sliding Surface Convergence'); grid on;
+subplot(4, 1, 1);
+plot(t, S, "LineWidth", 1.5);
+xlabel('Time [s]'); ylabel('S = Fm * xd');
+title('Sliding Surface Convergence');
+xlim([2.5, 3.5])
+grid on;
 
-subplot(3,1,2);
+% 2) velocity tracking
+subplot(4,1,2);
 plot(t, xhd, 'r--', t, xd, 'b');
-xlabel('Time [s]'); ylabel('Velocity [m/s]');
-legend('Human intent', 'Robot');
-title('Velocity Tracking');
+xlabel('Time [s]'); ylabel('velocity [m/s]');
+legend('x_hd (intent)', 'xd (robot)');
+title('Velocity tracking');
+xlim([2.5, 3.5])
 
-subplot(3,1,3);
+% 3) interaction force
+subplot(4,1,3);
 plot(t, fm);
-xlabel('Time [s]'); ylabel('f_m [N]');
-title('Interaction Force');
+xlabel('Time [s]'); ylabel('Interaction Force [N]');
+title('Interaction force f_m');
+xlim([2.5, 3.5])
+
+% 4) damping adaptation
+subplot(4,1,4);
+plot(t, D);
+xlabel('Time [s]'); ylabel('Damping Nm/s');
+title('Adapted Damping D(t)');
+xlim([2.5, 3.5])
 
 
-
-% %% energy consumption
-% % 6) Cumulative human work & passivity observer
-% Wh  = cumtrapz(t, abs(fm .* xd));   % W_h = ∫ F_h * \dot x dt
+% %%
+% Wh  = cumtrapz(t, fm .* xd);   % W_h = ∫ F_h * \dot x dt
+% Epo = cumtrapz(t, fm .* xd);   % same integral
 % 
 % figure;
 % subplot(2,1,1);
 % plot(t, Wh, 'm', 'LineWidth',1.2);
 % ylabel('W_h [J]'); title('Cumulative Human Work');
 % grid on;
-
-figure;
-subplot(3,1,1);
-plot(t, fm,'LineWidth',1.2);
-ylabel('Power J/s'); title('motion intent');
-grid on;
-
-subplot(3,1,2);
-plot(t, fh,'LineWidth',1.2);
-ylabel('F/N'); title('intended human force');
-grid on;
-
-subplot(3,1,3);
-plot(t, D);
-xlabel('Time [s]'); ylabel('Damping [N·s/m]');
-title('Adapted Damping');
+% 
+% subplot(2,1,2);
+% plot(t, Epo, 'c', 'LineWidth',1.2);
+% ylabel('E_{PO} [J]'); xlabel('Time [s]');
+% title('Passivity Observer (E_{PO} \ge 0)');
+% grid on;
